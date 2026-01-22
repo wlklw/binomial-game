@@ -37,49 +37,89 @@ function autoParseName(scientificName) {
 }
 
 // --- 透過 API 抓題並自動生成關卡 ---
+// --- 修正後的 startAutoGBIFMode ---
 async function startAutoGBIFMode(keyword) {
-    document.getElementById('mission-desc').textContent = `正在獵捕含有「${keyword}」的物種...`;
+    const feedbackEl = document.getElementById('mission-desc');
+    feedbackEl.textContent = `正在野外搜尋「${keyword}」...`;
     
     try {
-        // 搜尋 GBIF
-        const url = `${GBIF_API}?mediaType=StillImage&taxonKey=1&limit=20&q=${keyword}`; 
+        // 修正點：移除了 &taxonKey=1，這樣才能搜尋植物
+        // 增加 q=${keyword} 的精準度
+        const url = `${GBIF_API}?mediaType=StillImage&limit=50&q=${keyword}`; 
+        
         const response = await fetch(url);
+        
+        if (!response.ok) {
+            throw new Error(`API 回傳錯誤: ${response.status}`);
+        }
+
         const data = await response.json();
         
-        // 過濾：要有圖、要是種級別 (species)、學名要包含關鍵字
+        // 過濾資料：確保有學名、有圖片、且學名包含關鍵字
         const validResults = data.results.filter(item => 
             item.scientificName && 
             item.media && 
             item.media[0].identifier &&
-            item.scientificName.toLowerCase().includes(keyword)
+            item.scientificName.toLowerCase().includes(keyword.toLowerCase())
         );
 
         if (validResults.length === 0) {
-            alert("找不到標本，換個關鍵字試試！");
+            alert(`找不到「${keyword}」的相關標本，可能是資料庫暫時沒有圖片。`);
+            feedbackEl.textContent = "搜尋結果為空，請試試別的物種。";
             return;
         }
 
-        // 隨機選一隻
+        // 隨機取一隻
         const specimen = validResults[Math.floor(Math.random() * validResults.length)];
         
-        // --- 啟動全自動拆解 ---
-        const parsedRoots = autoParseName(specimen.scientificName);
+        // --- 接續原本的拆解邏輯 ---
+        let parsedRoots = autoParseName(specimen.scientificName);
         
-        // 如果拆解出來的字根太少 (只有 1 個)，遊戲會太無聊，我們補一些干擾項
-        if (parsedRoots.length < 1) {
-            // 如果連關鍵字都沒拆出來 (字典缺字)，手動補上關鍵字
-            parsedRoots.push({
-                text: keyword,
-                meaning: "未知字根 (請更新字典)",
-                raw: keyword
-            });
+        if (parsedRoots.length === 0) {
+             // 嘗試從字典找關鍵字的解釋
+             let dictEntry = LATIN_ROOTS.find(r => r.root === keyword) || { root: keyword, meaning: "關鍵字" };
+             parsedRoots.push({
+                 text: keyword.charAt(0).toUpperCase() + keyword.slice(1),
+                 raw: keyword,
+                 meaning: dictEntry.meaning
+             });
         }
 
-        generateAutoLevel(specimen, parsedRoots);
+        const cleanName = specimen.scientificName.split(' ').slice(0, 2).join(' ');
+        const solutionTexts = parsedRoots.map(r => r.text);
+        
+        let pool = [...parsedRoots];
+        for(let i=0; i<4; i++) {
+            const randomRoot = LATIN_ROOTS[Math.floor(Math.random() * LATIN_ROOTS.length)];
+            // 確保不重複加入
+            if (!pool.some(p => p.raw === randomRoot.root)) {
+                let display = randomRoot.root.charAt(0).toUpperCase() + randomRoot.root.slice(1);
+                pool.push({
+                    text: display + "?",
+                    meaning: randomRoot.meaning,
+                    raw: randomRoot.root
+                });
+            }
+        }
+
+        const newLevel = {
+            id: "gbif-" + Date.now(),
+            targetName: cleanName,
+            desc: `【野外採集】發現一隻生物！`,
+            hint: `採集地: ${specimen.country || '未知'} (嘗試拼湊出它的名字)`,
+            icon: "",
+            imageUrl: specimen.media[0].identifier,
+            solution: solutionTexts,
+            pool: pool
+        };
+
+        levels[currentLevelIdx] = newLevel;
+        initLevel();
 
     } catch (error) {
-        console.error(error);
-        alert("連線發生錯誤");
+        console.error("詳細錯誤訊息:", error); // 這行會顯示在 F12 Console
+        feedbackEl.textContent = "連線發生錯誤 (請按 F12 看 Console 錯誤訊息)";
+        alert("連線失敗！如果你是用電腦直接開啟檔案，請改用 GitHub Pages 瀏覽。");
     }
 }
 
@@ -147,3 +187,4 @@ function generateAutoLevel(specimen, correctRoots) {
         iconEl.textContent = level.icon;
     }
 */
+
