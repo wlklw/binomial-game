@@ -217,43 +217,58 @@ function generateSpeciesNotes(genus, specimen, roots, wikiHint) {
 }
 
 // ==========================================
-// 4. 維基百科 API 連線 (小幫手)
+// 4. 維基百科 API 連線 (雙語自動切換版)
 // ==========================================
 
 async function getWikiHelper(scientificName) {
     // 將學名轉為維基百科格式 (空格變底線)
     const wikiKey = scientificName.replace(' ', '_');
-    // 優先抓取中文維基百科
-    const url = `https://zh.wikipedia.org/api/rest_v1/page/summary/${wikiKey}`;
+    
+    // 定義要嘗試的語言順序：先中文 (zh)，再英文 (en)
+    const languages = ['zh', 'en'];
 
-    try {
-        const response = await fetch(url);
-        if (!response.ok) return null; // 找不到條目
-
-        const data = await response.json();
-        if (!data.extract) return null;
-
-        // --- 防雷處理 (重要！) ---
-        // 我們要過濾掉摘要裡的「學名」和「屬名」，避免直接把答案講出來
-        let cleanText = data.extract;
+    for (let lang of languages) {
+        const url = `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${wikiKey}`;
         
-        // 把學名 (如 Apis cerana) 換成 "此物種"
-        const regexSci = new RegExp(scientificName, "gi");
-        cleanText = cleanText.replace(regexSci, "此物種");
-        
-        // 為了避免太長，只取前 60 個字
-        if (cleanText.length > 60) {
-            cleanText = cleanText.substring(0, 60) + "...";
+        try {
+            const response = await fetch(url);
+            if (!response.ok) continue; // 如果 404，就換下一個語言試試
+
+            const data = await response.json();
+            if (!data.extract) continue;
+
+            // --- 防雷處理 ---
+            let cleanText = data.extract;
+            
+            // 替換學名 (不分大小寫)
+            const regexSci = new RegExp(scientificName, "gi");
+            const replacement = (lang === 'zh') ? "此物種" : "This species";
+            cleanText = cleanText.replace(regexSci, replacement);
+            
+            // 針對英文，有時候開頭會是 "Begonia hydrophila is a..."，也要把屬名+種名分開替換
+            const parts = scientificName.split(' ');
+            if (parts.length === 2) {
+                 // 嘗試把 "Begonia" 替換掉，避免太明顯
+                 // 但為了保留語意，英文版我們通常只濾除全名，或者簡單截斷
+            }
+
+            // 截斷過長的文字
+            const limit = (lang === 'zh') ? 60 : 100; // 英文給長一點
+            if (cleanText.length > limit) {
+                cleanText = cleanText.substring(0, limit) + "...";
+            }
+
+            // 回傳結果 (標註來源語言)
+            const prefix = (lang === 'zh') ? "📖 維基記載" : "📖 Wiki (EN)";
+            return `${prefix}：${cleanText}`;
+
+        } catch (e) {
+            console.log(`Wiki fetch failed for ${lang}`, e);
         }
-
-        return `📖 維基記載：${cleanText}`;
-
-    } catch (e) {
-        console.log("Wiki fetch failed", e);
-        return null;
     }
-}
 
+    return null; // 兩種語言都找不到
+}
 // ==========================================
 // 5. 核心邏輯：屬名挑戰 (包含物種分組 + 維基百科)
 // ==========================================
@@ -398,3 +413,4 @@ document.getElementById('next-btn').onclick = () => {
 
 // 啟動
 initLevel();
+
