@@ -34,7 +34,12 @@ function initLevel() {
     const level = levels[currentLevelIdx];
     
     // 1. UI 文字更新
-    document.getElementById('mission-desc').textContent = level.desc;
+    if (level.displayGenus) {
+        document.getElementById('mission-desc').innerHTML = 
+            `<span style="color:#e94560; font-size:1.2em;">${level.displayGenus}</span> <i>_______</i> ?<br>` + 
+            `<span style="font-size:0.8em; color:#ccc;">${level.desc}</span>`;
+    } else {
+        document.getElementById('mission-desc').textContent = level.desc;
     document.getElementById('mission-hint').textContent = level.hint;
     document.getElementById('mission-hint').style.color = "#ffeb3b"; // 讓提示顯眼一點
     
@@ -373,4 +378,5 @@ document.getElementById('next-btn').onclick = () => {
 };
 
 initLevel();
+
 
