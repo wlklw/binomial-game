@@ -186,3 +186,77 @@ button.next-btn {
     0% { transform: scale(0.8); }
     100% { transform: scale(1); }
 }
+
+/* --- 新增：搜索框樣式 (貼在 style.css 最下面) --- */
+.input-group {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 15px; /* 稍微增加間距讓畫面不擁擠 */
+    width: 100%; /* 確保在手機上不會跑版 */
+}
+
+#genus-input {
+    padding: 12px 15px;
+    border-radius: 25px;
+    border: 2px solid #555;
+    background: #16213e;
+    color: white;
+    font-size: 1rem;
+    width: 60%;
+    text-align: center;
+    outline: none;
+    transition: border-color 0.3s;
+}
+
+#genus-input:focus {
+    border-color: #e94560; /* 點擊輸入框時變色 */
+}
+
+.search-btn {
+    background: #e94560;
+    color: white;
+    border: none;
+    padding: 0 20px;
+    border-radius: 25px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 0.9rem;
+    white-space: nowrap; /* 防止按鈕文字換行 */
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    transition: transform 0.1s, background 0.3s;
+}
+
+.search-btn:active {
+    transform: scale(0.95);
+}
+
+.search-btn:hover {
+    background: #ff6b81;
+}
+
+.quick-tags {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 15px;
+}
+
+.quick-tags span {
+    font-size: 0.85rem;
+    color: #ccc;
+    background: rgba(255,255,255,0.1);
+    padding: 5px 10px;
+    border-radius: 15px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+}
+
+.quick-tags span:hover {
+    color: white;
+    background: var(--accent);
+    border-color: rgba(255,255,255,0.3);
+    transform: translateY(-2px);
+}
