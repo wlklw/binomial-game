@@ -32,23 +32,27 @@
     </div>
 
 <div class="api-controls">
-    <div class="api-title">📡 野外探索 (GBIF 連線模式)</div>
-    <div class="api-buttons">
-        <button onclick="startAutoGBIFMode('apis')">蜜蜂 (Apis)</button>
-        <button onclick="startAutoGBIFMode('vespa')">虎頭蜂 (Vespa)</button>
-        <button onclick="startAutoGBIFMode('formica')">螞蟻 (Formica)</button>
-        
-        <button onclick="startAutoGBIFMode('begonia')">秋海棠 (Begonia)</button>
-        
-        <button onclick="startAutoGBIFMode('dorcus')">鍬形蟲</button>
-        <button onclick="startAutoGBIFMode('dynastes')">兜蟲</button>
-        <button onclick="startAutoGBIFMode('formosa')">台灣特有種</button>
+    <div class="api-title">📡 獵人控制台：指定屬名挑戰</div>
+    
+    <div class="input-group">
+        <input type="text" id="genus-input" placeholder="輸入屬名 (如: Begonia, Dorcus)" value="Begonia">
+        <button onclick="startGenusChallenge()" class="search-btn">開始搜捕</button>
     </div>
-    <div class="api-note">*將從全球生物資料庫隨機抓取真實標本</div>
+
+    <div class="quick-tags">
+        <span onclick="quickSearch('Dorcus')">#Dorcus(鍬)</span>
+        <span onclick="quickSearch('Dynastes')">#Dynastes(兜)</span>
+        <span onclick="quickSearch('Begonia')">#Begonia(秋海棠)</span>
+        <span onclick="quickSearch('Vespa')">#Vespa(虎頭蜂)</span>
+        <span onclick="quickSearch('Formosa')">#台灣特有種</span>
+    </div>
+
+    <div class="api-note">*系統將鎖定該屬，請您鑑定出具體的「種小名」</div>
 </div>
 
     <script src="dictionary.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
+
 
