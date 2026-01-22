@@ -98,3 +98,20 @@ function convertSpecimenToLevel(specimen, targetRoot) {
         document.getElementById('target-icon').textContent = level.icon;
     }
 */
+async function startGBIFMode(root) {
+    // 呼叫 API
+    const levelData = await fetchFromGBIF(root);
+    
+    if (levelData) {
+        // 為了簡單起見，我們暫時把這關變成 currentLevel
+        // 在正式版中，你可能需要把它 push 到 levels 陣列裡
+        
+        // 這裡是一個 Hack，強制覆蓋目前的關卡並重繪
+        levels[currentLevelIdx] = levelData; 
+        
+        // 因為自動生成的 solution 邏輯比較簡單，我們需要調整檢查機制
+        // (這部分需要根據你的需求細修，目前先讓它能顯示圖片)
+        
+        initLevel(); // 重新渲染畫面
+    }
+}
