@@ -1,14 +1,14 @@
 // ==========================================
-// 1. 全域變數設定
+// 1. 全域變數與預設資料
 // ==========================================
 
-// 預設關卡 (當不連網時可玩)
+// 預設關卡 (離線時可玩)
 let levels = [
     {
         id: "static-1",
         targetName: "Melanogaster",
-        desc: "【遺傳學】觀察重點：這隻蒼蠅有著明顯特徵",
-        hint: "🕵️ 線索：學名意指「黑色的」+「腹部」",
+        desc: "【入門】這隻蒼蠅有著「黑色的肚皮」",
+        hint: "(遺傳學模式生物)",
         icon: "🪰",
         solution: ["Melano-", "-gaster"],
         pool: [
@@ -25,23 +25,31 @@ let currentSlots = [];
 const GBIF_API = "https://api.gbif.org/v1/occurrence/search";
 
 // ==========================================
-// 2. 核心遊戲邏輯
+// 2. 核心遊戲介面邏輯 (UI)
 // ==========================================
 
 function initLevel() {
+    // 安全檢查
     if (!levels || levels.length === 0) return;
 
     const level = levels[currentLevelIdx];
     
     // 1. UI 文字更新
+    const descEl = document.getElementById('mission-desc');
+    
+    // 判斷是否為「屬名挑戰模式」(有 displayGenus 欄位)
     if (level.displayGenus) {
-        document.getElementById('mission-desc').innerHTML = 
-            `<span style="color:#e94560; font-size:1.2em;">${level.displayGenus}</span> <i>_______</i> ?<br>` + 
-            `<span style="font-size:0.8em; color:#ccc;">${level.desc}</span>`;
+        // 顯示格式：Begonia _______ ?
+        descEl.innerHTML = 
+            `<span style="color:#e94560; font-size:1.3em; font-weight:bold;">${level.displayGenus}</span> ` +
+            `<span style="border-bottom: 2px solid #fff; display:inline-block; width:80px; text-align:center;">?</span>` +
+            `<div style="font-size:0.9rem; color:#bbb; margin-top:5px; font-weight:normal;">${level.desc}</div>`;
     } else {
-        document.getElementById('mission-desc').textContent = level.desc;
+        // 一般模式
+        descEl.textContent = level.desc;
+    }
+    
     document.getElementById('mission-hint').textContent = level.hint;
-    document.getElementById('mission-hint').style.color = "#ffeb3b"; // 讓提示顯眼一點
     
     // 2. 圖片處理
     const iconEl = document.getElementById('target-icon');
@@ -69,7 +77,7 @@ function initLevel() {
         const slotDiv = document.createElement('div');
         slotDiv.className = 'slot';
         slotDiv.id = `slot-${i}`;
-        slotDiv.onclick = function() { removeSlot(i); };
+        slotDiv.onclick = function() { removeSlot(i); }; // Closure
         chamber.appendChild(slotDiv);
     }
 
@@ -122,111 +130,155 @@ function checkAnswer() {
     if (currentSlots.includes(null)) return;
 
     const level = levels[currentLevelIdx];
+    // 玩家答案：把字根接起來，轉小寫，去掉連字號
     const playerAnswer = currentSlots.map(c => c.text.replace(/-/g, '')).join("").toLowerCase();
+    // 正確答案：也是同樣處理
     const targetSimple = level.targetName.replace(/-/g, '').toLowerCase();
     
     const feedbackEl = document.getElementById('feedback-msg');
 
-    if (targetSimple.includes(playerAnswer)) {
-        feedbackEl.textContent = `✅ 鑑定成功！學名：${level.targetName}`;
+    // 比對邏輯：只要包含或是相等都算對
+    if (targetSimple.includes(playerAnswer) || playerAnswer.includes(targetSimple)) {
+        
+        // 如果是 API 模式，顯示完整學名
+        const displayName = level.displayGenus ? 
+                           `${level.displayGenus} ${level.targetName}` : 
+                           level.targetName;
+
+        feedbackEl.textContent = `✅ 鑑定成功！學名：${displayName}`;
         feedbackEl.classList.add('success');
         document.getElementById('next-btn').style.display = "inline-block";
     } else {
-        feedbackEl.textContent = "❌ 鑑定錯誤：特徵與學名不符";
+        feedbackEl.textContent = "❌ 錯誤：這不是正確的種小名";
         feedbackEl.classList.add('fail');
     }
 }
 
 // ==========================================
-// 3. GBIF 自動連線 (種名挑戰模式)
+// 3. 工具函式：拆解學名 (之前報錯就是缺這個!)
 // ==========================================
 
-// 快速搜索輔助函式
+function autoParseName(scientificName) {
+    // 轉小寫並清乾淨
+    let cleanName = scientificName.split(' ').slice(0, 2).join(' ').toLowerCase();
+    let detectedRoots = [];
+    
+    // 檢查字典是否存在
+    if (typeof LATIN_ROOTS === 'undefined') {
+        console.error("字典檔 dictionary.js 未載入");
+        return [];
+    }
+
+    // 依照字根長度排序，優先比對長字根
+    let sortedDictionary = LATIN_ROOTS.sort((a, b) => b.root.length - a.root.length);
+
+    sortedDictionary.forEach(item => {
+        if (cleanName.includes(item.root)) {
+            // 避免重複添加
+            if (!detectedRoots.some(r => r.raw === item.root)) {
+                let displayRoot = item.root.charAt(0).toUpperCase() + item.root.slice(1);
+                
+                // 判斷前後綴給予 "-" (純視覺效果)
+                if (cleanName.startsWith(item.root)) displayRoot += "-";
+                else if (cleanName.endsWith(item.root)) displayRoot = "-" + displayRoot;
+                else displayRoot = "-" + displayRoot + "-";
+
+                detectedRoots.push({
+                    text: displayRoot,
+                    raw: item.root,
+                    meaning: item.meaning
+                });
+            }
+        }
+    });
+    return detectedRoots;
+}
+
+// 產生觀察筆記文字
+function generateSpeciesNotes(genus, specimen, roots) {
+    const location = specimen.country || "未知產地";
+    let meanings = roots.map(r => `「${r.meaning}」`).join(" 加 ");
+    if (meanings === "") meanings = "獨特的特徵";
+
+    return {
+        desc: `📍 採集地：${location}`,
+        hint: `🕵️ 命名線索：種名描述了 ${meanings}`
+    };
+}
+
+// ==========================================
+// 4. API 連線邏輯 (屬名挑戰模式)
+// ==========================================
+
 function quickSearch(keyword) {
     document.getElementById('genus-input').value = keyword;
     startGenusChallenge();
 }
 
-// 核心功能：開始屬名挑戰
 async function startGenusChallenge() {
     const inputEl = document.getElementById('genus-input');
     const genusKeyword = inputEl.value.trim();
-    
+    const feedbackEl = document.getElementById('mission-desc');
+
     if (!genusKeyword) {
-        alert("請先輸入想要挑戰的屬名！");
+        alert("請輸入屬名！");
         return;
     }
 
-    const feedbackEl = document.getElementById('mission-desc');
-    feedbackEl.textContent = `正在定位 ${genusKeyword} 屬的生物信號...`;
+    feedbackEl.innerHTML = `📡 正在搜尋 <span style="color:#e94560">${genusKeyword}</span> 屬的標本...`;
     
     try {
-        // 搜尋該屬底下的物種
-        // limit=100 抓多一點才能過濾掉太簡單的
+        // limit=100 抓多一點才能隨機出題
         const url = `${GBIF_API}?mediaType=StillImage&limit=100&q=${genusKeyword}`; 
         
         const response = await fetch(url);
-        if (!response.ok) throw new Error("API Error");
+        if (!response.ok) throw new Error("API Network Error");
         const data = await response.json();
         
-        // 過濾資料：
-        // 1. 要有學名和圖片
-        // 2. 學名必須是「二名法」 (Genus species) 結構
-        // 3. 學名的第一個字必須包含我們搜尋的屬名 (確保沒搜歪)
+        // 過濾：1.要有圖 2.學名要是該屬開頭
         const validResults = data.results.filter(item => {
             if (!item.scientificName || !item.media || !item.media[0].identifier) return false;
-            
             const parts = item.scientificName.split(' ');
-            // 確保至少有 屬名+種名 (長度>=2)
             if (parts.length < 2) return false;
-            
-            // 確保搜出來的是目標屬 (忽略大小寫)
+            // 比對屬名 (忽略大小寫)
             return parts[0].toLowerCase().includes(genusKeyword.toLowerCase());
         });
 
         if (validResults.length === 0) {
-            alert(`找不到 ${genusKeyword} 屬的相關圖片標本，請換一個屬名試試！`);
+            alert(`找不到 ${genusKeyword} 屬的相關圖片，請確認拼字或換個屬名。`);
             feedbackEl.textContent = "搜尋結果為空。";
             return;
         }
 
-        // 隨機取一隻
+        // 隨機選一隻
         const specimen = validResults[Math.floor(Math.random() * validResults.length)];
         
-        // --- 關鍵修改：分離 屬名 (Genus) 與 種名 (Species) ---
         const nameParts = specimen.scientificName.split(' ');
-        const genusName = nameParts[0];      // e.g., Begonia
-        const speciesName = nameParts[1];    // e.g., maculata (這才是我們要猜的!)
+        const genusName = nameParts[0];   // 屬名 (e.g. Begonia)
+        const speciesName = nameParts[1]; // 種名 (e.g. maculata)
 
-        // 拆解「種名」的字根
+        // 拆解「種名」
         let parsedRoots = autoParseName(speciesName);
         
-        // 如果字典裡沒有這個種名的字根，手動把種名當作一個卡牌
+        // 如果字典拆不出來，手動把種名加進去
         if (parsedRoots.length === 0) {
-             let dictEntry = LATIN_ROOTS.find(r => r.root === speciesName.toLowerCase()) || { root: speciesName, meaning: "獨特特徵" };
+             let dictEntry = LATIN_ROOTS.find(r => r.root === speciesName.toLowerCase()) || { root: speciesName, meaning: "特有名稱" };
              parsedRoots.push({
-                 text: speciesName, // 不轉大寫，保持原味或是首字大寫看你喜好
+                 text: speciesName.charAt(0).toUpperCase() + speciesName.slice(1),
                  raw: speciesName.toLowerCase(),
                  meaning: dictEntry.meaning
              });
         }
 
-        // 生成描述 (傳入 屬名 和 字根)
         const notes = generateSpeciesNotes(genusName, specimen, parsedRoots);
-
-        // 準備正確答案 (只含種名)
         const solutionTexts = parsedRoots.map(r => r.text);
         
-        // 準備混淆卡池
+        // 混淆卡池
         let pool = [...parsedRoots];
-        for(let i=0; i<5; i++) { // 多給一點干擾項
+        for(let i=0; i<5; i++) {
             const randomRoot = LATIN_ROOTS[Math.floor(Math.random() * LATIN_ROOTS.length)];
-            // 避免重複
             if (!pool.some(p => p.raw === randomRoot.root)) {
                 let display = randomRoot.root.charAt(0).toUpperCase() + randomRoot.root.slice(1);
-                // 視覺上加個後綴讓它看起來像種名
-                if(!display.startsWith("-")) display = display; 
-                
                 pool.push({
                     text: display + "?",
                     meaning: randomRoot.meaning,
@@ -237,8 +289,8 @@ async function startGenusChallenge() {
 
         const newLevel = {
             id: "gbif-" + Date.now(),
-            targetName: speciesName, // 答案改成只有種名！
-            displayGenus: genusName, // 額外欄位：顯示屬名給玩家看
+            targetName: speciesName, // 答案是種名
+            displayGenus: genusName, // UI顯示屬名
             desc: notes.desc,
             hint: notes.hint,
             icon: "",
@@ -252,131 +304,20 @@ async function startGenusChallenge() {
 
     } catch (error) {
         console.error(error);
-        alert("連線失敗，請檢查網路。");
+        alert("連線失敗，請檢查網路狀態。");
     }
 }
 
-// 產生針對「種名」的提示
-function generateSpeciesNotes(genus, specimen, roots) {
-    const location = specimen.country || "未知產地";
-    
-    // 把意思串起來
-    let meanings = roots.map(r => `「${r.meaning}」`).join(" 或 ");
-    if (meanings === "") meanings = "某種特殊命名";
 
-    return {
-        desc: `📍 ${location} 發現的 ${genus} (屬)`,
-        hint: `🕵️ 種名解碼：這隻 ${genus} 的種名描述了 ${meanings}`
-    };
-}
-
-// 修改 initLevel 的 checkAnswer 邏輯 (配合 script.js 前半段)
-// 注意：你原本的 initLevel 裡面的 checkAnswer 可能比對的是 targetName
-// 因為現在 targetName 只有種名，所以邏輯不用大改，但 UI 顯示要注意
-// 產生「野外觀察筆記」文字
-function generateFieldNotes(specimen, roots) {
-    // 1. 地理位置
-    const location = specimen.country || "未知地區";
-    
-    // 2. 分類學線索 (利用 GBIF 的 family/order 欄位)
-    let taxonomy = "";
-    if (specimen.family) taxonomy += `${specimen.family}科`;
-    else if (specimen.order) taxonomy += `${specimen.order}目`;
-    else taxonomy += "某種生物";
-
-    // 3. 字根線索 (這是最重要的部分)
-    // 把拆解出來的意思串起來，變成提示
-    let meanings = roots.map(r => `「${r.meaning}」`).join(" 加 ");
-    if (meanings === "") meanings = "某種特殊特徵";
-
-    return {
-        desc: `📍 採集紀錄：這是在 ${location} 發現的 ${taxonomy}。`,
-        hint: `🕵️ 命名線索：請尋找代表 ${meanings} 的字根。`
-    };
-}
-
-async function startAutoGBIFMode(keyword) {
-    const feedbackEl = document.getElementById('mission-desc');
-    feedbackEl.textContent = `正在資料庫中檢索「${keyword}」...`;
-    
-    try {
-        const url = `${GBIF_API}?mediaType=StillImage&limit=50&q=${keyword}`; 
-        const response = await fetch(url);
-        if (!response.ok) throw new Error("API Error");
-        const data = await response.json();
-        
-        const validResults = data.results.filter(item => 
-            item.scientificName && item.media && item.media[0].identifier &&
-            item.scientificName.toLowerCase().includes(keyword.toLowerCase())
-        );
-
-        if (validResults.length === 0) {
-            alert(`找不到相關標本。`);
-            return;
-        }
-
-        const specimen = validResults[Math.floor(Math.random() * validResults.length)];
-        
-        // 拆解字根
-        let parsedRoots = autoParseName(specimen.scientificName);
-        
-        if (parsedRoots.length === 0) {
-             let dictEntry = LATIN_ROOTS.find(r => r.root === keyword) || { root: keyword, meaning: "關鍵字" };
-             parsedRoots.push({
-                 text: keyword.charAt(0).toUpperCase() + keyword.slice(1),
-                 raw: keyword,
-                 meaning: dictEntry.meaning
-             });
-        }
-
-        // --- 這裡呼叫新函式來產生描述 ---
-        const notes = generateFieldNotes(specimen, parsedRoots);
-
-        const cleanName = specimen.scientificName.split(' ').slice(0, 2).join(' ');
-        const solutionTexts = parsedRoots.map(r => r.text);
-        
-        // 填充卡池
-        let pool = [...parsedRoots];
-        for(let i=0; i<4; i++) {
-            const randomRoot = LATIN_ROOTS[Math.floor(Math.random() * LATIN_ROOTS.length)];
-            if (!pool.some(p => p.raw === randomRoot.root)) {
-                let display = randomRoot.root.charAt(0).toUpperCase() + randomRoot.root.slice(1);
-                pool.push({
-                    text: display + "?",
-                    meaning: randomRoot.meaning,
-                    raw: randomRoot.root
-                });
-            }
-        }
-
-        const newLevel = {
-            id: "gbif-" + Date.now(),
-            targetName: cleanName,
-            desc: notes.desc,  // 使用生成的描述
-            hint: notes.hint,  // 使用生成的線索
-            icon: "",
-            imageUrl: specimen.media[0].identifier,
-            solution: solutionTexts,
-            pool: pool
-        };
-
-        levels[currentLevelIdx] = newLevel;
-        initLevel();
-
-    } catch (error) {
-        console.error(error);
-        alert("連線失敗。");
-    }
-}
+// ==========================================
+// 5. 事件綁定
+// ==========================================
 
 document.getElementById('next-btn').onclick = () => {
-    // 讓按鈕可以直接搜尋下一隻 (稍微改善體驗)
-    // 這裡我們簡單重置介面，實際上你可以讓它記錄上次搜尋的 keyword
-    alert("請點擊下方按鈕選擇下一個探索目標！");
-    currentLevelIdx = 0;
-    initLevel();
+    // 簡單重置，引導玩家再按一次搜索
+    alert("標本已歸檔！請再次點擊「開始搜捕」或選擇新的標籤。");
+    // 這裡不自動重置畫面，保留成就感，等待玩家下一步操作
 };
 
+// 啟動
 initLevel();
-
-
