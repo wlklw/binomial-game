@@ -215,6 +215,10 @@ function quickSearch(keyword) {
     startGenusChallenge();
 }
 
+// ==========================================
+// 更新：屬名挑戰 (加入「物種多樣性」演算法)
+// ==========================================
+
 async function startGenusChallenge() {
     const inputEl = document.getElementById('genus-input');
     const genusKeyword = inputEl.value.trim();
@@ -225,42 +229,64 @@ async function startGenusChallenge() {
         return;
     }
 
-    feedbackEl.innerHTML = `📡 正在搜尋 <span style="color:#e94560">${genusKeyword}</span> 屬的標本...`;
+    feedbackEl.innerHTML = `📡 正在廣域搜索 <span style="color:#e94560">${genusKeyword}</span> 屬的多樣性標本...`;
     
     try {
-        // limit=100 抓多一點才能隨機出題
-        const url = `${GBIF_API}?mediaType=StillImage&limit=100&q=${genusKeyword}`; 
+        // 1. 擴大搜索：抓 300 筆，增加抓到稀有種的機率
+        const url = `${GBIF_API}?mediaType=StillImage&limit=300&q=${genusKeyword}`; 
         
         const response = await fetch(url);
         if (!response.ok) throw new Error("API Network Error");
         const data = await response.json();
         
-        // 過濾：1.要有圖 2.學名要是該屬開頭
+        // 2. 初步過濾
         const validResults = data.results.filter(item => {
             if (!item.scientificName || !item.media || !item.media[0].identifier) return false;
             const parts = item.scientificName.split(' ');
             if (parts.length < 2) return false;
-            // 比對屬名 (忽略大小寫)
             return parts[0].toLowerCase().includes(genusKeyword.toLowerCase());
         });
 
         if (validResults.length === 0) {
-            alert(`找不到 ${genusKeyword} 屬的相關圖片，請確認拼字或換個屬名。`);
+            alert(`找不到 ${genusKeyword} 屬的相關圖片。`);
             feedbackEl.textContent = "搜尋結果為空。";
             return;
         }
 
-        // 隨機選一隻
-        const specimen = validResults[Math.floor(Math.random() * validResults.length)];
+        // --- 核心修改：物種分組演算法 (Species Grouping) ---
+        // 目的：避免常見物種 (如 Apis mellifera) 霸佔所有出現機率
+        const speciesGroups = {};
         
-        const nameParts = specimen.scientificName.split(' ');
-        const genusName = nameParts[0];   // 屬名 (e.g. Begonia)
-        const speciesName = nameParts[1]; // 種名 (e.g. maculata)
+        validResults.forEach(item => {
+            // 只取前兩個字當學名 (屬名 + 種小名)，忽略亞種
+            const speciesName = item.scientificName.split(' ').slice(0, 2).join(' ');
+            
+            if (!speciesGroups[speciesName]) {
+                speciesGroups[speciesName] = [];
+            }
+            speciesGroups[speciesName].push(item);
+        });
 
-        // 拆解「種名」
+        // 取得所有「獨特物種」的清單
+        const uniqueSpeciesNames = Object.keys(speciesGroups);
+        
+        console.log(`搜尋到了 ${uniqueSpeciesNames.length} 種不同的物種：`, uniqueSpeciesNames); // 可以在 F12 偷看
+
+        // 3. 公平抽籤：先選「物種」，而不是選「照片」
+        const randomSpecies = uniqueSpeciesNames[Math.floor(Math.random() * uniqueSpeciesNames.length)];
+        
+        // 4. 再從該物種中，隨機選一張照片
+        const targetList = speciesGroups[randomSpecies];
+        const specimen = targetList[Math.floor(Math.random() * targetList.length)];
+        
+        // --------------------------------------------------
+
+        const nameParts = specimen.scientificName.split(' ');
+        const genusName = nameParts[0];
+        const speciesName = nameParts[1];
+
         let parsedRoots = autoParseName(speciesName);
         
-        // 如果字典拆不出來，手動把種名加進去
         if (parsedRoots.length === 0) {
              let dictEntry = LATIN_ROOTS.find(r => r.root === speciesName.toLowerCase()) || { root: speciesName, meaning: "特有名稱" };
              parsedRoots.push({
@@ -273,7 +299,6 @@ async function startGenusChallenge() {
         const notes = generateSpeciesNotes(genusName, specimen, parsedRoots);
         const solutionTexts = parsedRoots.map(r => r.text);
         
-        // 混淆卡池
         let pool = [...parsedRoots];
         for(let i=0; i<5; i++) {
             const randomRoot = LATIN_ROOTS[Math.floor(Math.random() * LATIN_ROOTS.length)];
@@ -289,8 +314,8 @@ async function startGenusChallenge() {
 
         const newLevel = {
             id: "gbif-" + Date.now(),
-            targetName: speciesName, // 答案是種名
-            displayGenus: genusName, // UI顯示屬名
+            targetName: speciesName,
+            displayGenus: genusName,
             desc: notes.desc,
             hint: notes.hint,
             icon: "",
@@ -308,7 +333,6 @@ async function startGenusChallenge() {
     }
 }
 
-
 // ==========================================
 // 5. 事件綁定
 // ==========================================
@@ -321,3 +345,4 @@ document.getElementById('next-btn').onclick = () => {
 
 // 啟動
 initLevel();
+
