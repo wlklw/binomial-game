@@ -9,36 +9,42 @@
 <body>
 
     <h1>Dr. Binomial's Lab</h1>
-    <div class="subtitle">Lv. 1 實習生 - 字源合成實驗</div>
+    <div class="subtitle">Lv. 博士 - 生物學名解碼器</div>
 
     <div class="stage-area">
         <div class="target-image" id="target-icon">❓</div>
+        
         <div class="mission-text" id="mission-desc">載入中...</div>
         <div class="hint-text" id="mission-hint"></div>
         
         <div class="feedback" id="feedback-msg"></div>
 
-        <div class="synthesis-chamber">
-            <div class="slot" id="slot-0"></div>
-            <div class="slot" id="slot-1"></div>
-        </div>
+        <div class="synthesis-chamber" id="chamber">
+            </div>
 
         <button class="next-btn" id="next-btn">下一隻生物 &rarr;</button>
     </div>
 
     <div class="lab-bench">
-        <div class="api-controls" style="margin: 10px; text-align: center;">
-    <span>連線尋找：</span>
-    <button onclick="startGBIFMode('ptera')">翅膀類 (-ptera)</button>
-    <button onclick="startGBIFMode('ceros')">有角類 (-ceros)</button>
-    <button onclick="startGBIFMode('melano')">黑色生物 (Melano-)</button>
-</div>
         <div class="bench-label">可用字根 (點擊加入)</div>
         <div class="card-pool" id="pool">
             </div>
     </div>
 
+    <div class="api-controls">
+        <div class="api-title">📡 野外探索 (GBIF 連線模式)</div>
+        <div class="api-buttons">
+            <button onclick="startAutoGBIFMode('dorcus')">鍬形蟲 (Dorcus)</button>
+            <button onclick="startAutoGBIFMode('dynastes')">兜蟲 (Dynastes)</button>
+            <button onclick="startAutoGBIFMode('bucephalandra')">辣椒榕 (Bucephalandra)</button>
+            <button onclick="startAutoGBIFMode('dendrobates')">箭毒蛙 (Dendrobates)</button>
+            <button onclick="startAutoGBIFMode('formosa')">台灣特有種 (Formosa)</button>
+            <button onclick="startAutoGBIFMode('isopoda')">等足蟲 (Isopoda)</button>
+        </div>
+        <div class="api-note">*將從全球生物資料庫隨機抓取真實標本</div>
+    </div>
+
+    <script src="dictionary.js"></script>
     <script src="script.js"></script>
 </body>
-
 </html>
