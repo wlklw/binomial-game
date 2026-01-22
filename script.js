@@ -1,117 +1,149 @@
-// --- 字根字典 (這是我們的翻譯機) ---
-// 我們只能考我們「認得」的字根，這樣遊戲才有教育意義
-const KNOWN_ROOTS = {
-    "ptera": { meaning: "翅膀", type: "suffix" },
-    "poda": { meaning: "腳/足", type: "suffix" },
-    "ceros": { meaning: "角", type: "suffix" },
-    "gaster": { meaning: "腹部", type: "suffix" },
-    "cephala": { meaning: "頭", type: "suffix" },
-    "mega": { meaning: "巨大的", type: "prefix" },
-    "micro": { meaning: "微小的", type: "prefix" },
-    "melano": { meaning: "黑色的", type: "prefix" },
-    "leuco": { meaning: "白色的", type: "prefix" }
-};
-
 // --- GBIF API 設定 ---
 const GBIF_API = "https://api.gbif.org/v1/occurrence/search";
 
-// 這一區是用來從網路抓題目的
-async function fetchFromGBIF(rootKeyword) {
-    // 顯示載入中...
-    document.getElementById('mission-desc').textContent = "正在連線至全球生物多樣性資料庫...";
+// --- 全自動拆解引擎 (核心邏輯) ---
+function autoParseName(scientificName) {
+    // 1. 預處理：轉小寫，去掉命名者 (只留屬名+種小名)
+    // 例如 "Dynastes hercules (Linnaeus)" -> "dynastes hercules"
+    let cleanName = scientificName.split(' ').slice(0, 2).join(' ').toLowerCase();
+    
+    let detectedRoots = [];
+    
+    // 2. 智慧匹配：按照字根長度排序 (優先匹配長字根，避免 "bi" 誤判 "biology")
+    let sortedDictionary = LATIN_ROOTS.sort((a, b) => b.root.length - a.root.length);
+
+    // 3. 掃描學名
+    sortedDictionary.forEach(item => {
+        if (cleanName.includes(item.root)) {
+            // 避免重複添加 (例如找到 two 'ptera')
+            if (!detectedRoots.some(r => r.text === item.root)) {
+                // 為了美觀，將字首大寫 (e.g., "melano" -> "Melano")
+                let displayRoot = item.root.charAt(0).toUpperCase() + item.root.slice(1);
+                // 判斷是字首還是字尾 (加 "-" 號)
+                if (cleanName.startsWith(item.root)) displayRoot += "-";
+                else if (cleanName.endsWith(item.root)) displayRoot = "-" + displayRoot;
+                else displayRoot = "-" + displayRoot + "-";
+
+                detectedRoots.push({
+                    text: displayRoot, // 顯示在卡片上的字
+                    raw: item.root,    // 原始字根用於比對
+                    meaning: item.meaning
+                });
+            }
+        }
+    });
+
+    return detectedRoots;
+}
+
+// --- 透過 API 抓題並自動生成關卡 ---
+async function startAutoGBIFMode(keyword) {
+    document.getElementById('mission-desc').textContent = `正在獵捕含有「${keyword}」的物種...`;
     
     try {
-        // 建構查詢：搜尋有圖片的、屬於昆蟲綱的、學名包含我們指定字根的物種
-        // q=${rootKeyword} 表示搜尋學名裡包含這個字的
-        const url = `${GBIF_API}?mediaType=StillImage&taxonKey=1&limit=10&q=${rootKeyword}`; 
-        
+        // 搜尋 GBIF
+        const url = `${GBIF_API}?mediaType=StillImage&taxonKey=1&limit=20&q=${keyword}`; 
         const response = await fetch(url);
         const data = await response.json();
         
-        // 過濾出有學名且有圖片的資料
+        // 過濾：要有圖、要是種級別 (species)、學名要包含關鍵字
         const validResults = data.results.filter(item => 
-            item.scientificName && item.media && item.media[0].identifier
+            item.scientificName && 
+            item.media && 
+            item.media[0].identifier &&
+            item.scientificName.toLowerCase().includes(keyword)
         );
 
         if (validResults.length === 0) {
-            alert("找不到適合的標本，請重試！");
-            return null;
+            alert("找不到標本，換個關鍵字試試！");
+            return;
         }
 
         // 隨機選一隻
         const specimen = validResults[Math.floor(Math.random() * validResults.length)];
         
-        return convertSpecimenToLevel(specimen, rootKeyword);
+        // --- 啟動全自動拆解 ---
+        const parsedRoots = autoParseName(specimen.scientificName);
+        
+        // 如果拆解出來的字根太少 (只有 1 個)，遊戲會太無聊，我們補一些干擾項
+        if (parsedRoots.length < 1) {
+            // 如果連關鍵字都沒拆出來 (字典缺字)，手動補上關鍵字
+            parsedRoots.push({
+                text: keyword,
+                meaning: "未知字根 (請更新字典)",
+                raw: keyword
+            });
+        }
+
+        generateAutoLevel(specimen, parsedRoots);
 
     } catch (error) {
-        console.error("GBIF Error:", error);
-        document.getElementById('mission-desc').textContent = "連線失敗，請檢查網路。";
+        console.error(error);
+        alert("連線發生錯誤");
     }
 }
 
-// 將 GBIF 的資料轉換成我們的遊戲關卡格式
-function convertSpecimenToLevel(specimen, targetRoot) {
-    // 簡化學名 (去掉命名者和年份，只留屬名+種小名)
-    // 例如 "Dynastes hercules (Linnaeus, 1758)" -> "Dynastes hercules"
+function generateAutoLevel(specimen, correctRoots) {
     let cleanName = specimen.scientificName.split(' ').slice(0, 2).join(' ');
+
+    // 準備正確答案
+    const solutionTexts = correctRoots.map(r => r.text);
+
+    // 準備卡池 (正確答案 + 隨機干擾項)
+    let pool = [...correctRoots];
     
-    // 建立新關卡物件
+    // 隨機從字典抓 4 個無關的字根當干擾
+    for(let i=0; i<4; i++) {
+        const randomRoot = LATIN_ROOTS[Math.floor(Math.random() * LATIN_ROOTS.length)];
+        // 避免重複
+        if (!pool.some(p => p.raw === randomRoot.root)) {
+             let display = randomRoot.root.charAt(0).toUpperCase() + randomRoot.root.slice(1);
+             pool.push({
+                 text: display + "?", // 加個問號增加不確定性
+                 meaning: randomRoot.meaning
+             });
+        }
+    }
+
+    // 建立關卡物件
     const newLevel = {
-        id: "gbif-" + Math.floor(Math.random() * 10000),
+        id: "auto-" + Date.now(),
         targetName: cleanName,
-        desc: `【GBIF 標本】這隻生物的學名包含「${KNOWN_ROOTS[targetRoot].meaning}」`,
-        hint: `(發現地: ${specimen.country || '未知'})`,
-        icon: "", // 這裡我們會用真正的圖片取代 icon
-        imageUrl: specimen.media[0].identifier, // 存入圖片網址
-        solution: [], // 這裡需要更複雜的邏輯來自動拆解，目前先做簡單版
-        pool: []
+        desc: `【野外採集】發現一隻生物！`,
+        hint: `採集地: ${specimen.country || '未知'} (嘗試拼湊出它的名字)`,
+        icon: "",
+        imageUrl: specimen.media[0].identifier,
+        solution: solutionTexts,
+        pool: pool
     };
 
-    // --- 自動生成選項邏輯 (簡單版) ---
-    // 1. 把正確答案放進去 (只針對我們搜尋的那個字根)
-    newLevel.solution.push(targetRoot); // 注意：這裡只會放一個字根當作測試
+    // 強制切換關卡
+    // 這裡我們用一個簡單的方法更新全域變數
+    // 在真實專案中建議把 levels 變成 let 宣告
+    levels[currentLevelIdx] = newLevel;
     
-    // 2. 填充卡池
-    newLevel.pool.push({ 
-        text: targetRoot, 
-        meaning: KNOWN_ROOTS[targetRoot].meaning 
-    });
+    // 重新繪製
+    initLevel();
     
-    // 3. 加幾個隨機錯誤選項
-    const distractors = ["pseudo", "mega", "micro", "phylla"];
-    distractors.forEach(d => {
-        newLevel.pool.push({ text: d, meaning: "隨機字根" }); // 這裡可以優化
-    });
-
-    return newLevel;
+    // 特別處理圖片顯示
+    const iconEl = document.getElementById('target-icon');
+    iconEl.textContent = "";
+    iconEl.style.backgroundImage = `url('${newLevel.imageUrl}')`;
+    iconEl.style.backgroundSize = "cover";
+    iconEl.style.backgroundPosition = "center";
 }
 
-// --- 修改原本的 initLevel 讓它可以支援圖片 URL ---
-// 你需要去修改原本的 initLevel 函式，增加這一段判斷：
+// 讓原本的 initLevel 也能處理圖片 (請修改你的 initLevel 函式)
+// 在 initLevel 裡加上這一段：
 /*
+    const iconEl = document.getElementById('target-icon');
     if (level.imageUrl) {
-        document.getElementById('target-icon').textContent = ""; // 清空 emoji
-        document.getElementById('target-icon').style.backgroundImage = `url(${level.imageUrl})`;
-        document.getElementById('target-icon').style.backgroundSize = "cover";
+        iconEl.textContent = "";
+        iconEl.style.backgroundImage = `url('${level.imageUrl}')`;
+        iconEl.style.backgroundSize = "cover";
+         iconEl.style.backgroundPosition = "center";
     } else {
-        document.getElementById('target-icon').style.backgroundImage = "none";
-        document.getElementById('target-icon').textContent = level.icon;
+        iconEl.style.backgroundImage = "none";
+        iconEl.textContent = level.icon;
     }
 */
-async function startGBIFMode(root) {
-    // 呼叫 API
-    const levelData = await fetchFromGBIF(root);
-    
-    if (levelData) {
-        // 為了簡單起見，我們暫時把這關變成 currentLevel
-        // 在正式版中，你可能需要把它 push 到 levels 陣列裡
-        
-        // 這裡是一個 Hack，強制覆蓋目前的關卡並重繪
-        levels[currentLevelIdx] = levelData; 
-        
-        // 因為自動生成的 solution 邏輯比較簡單，我們需要調整檢查機制
-        // (這部分需要根據你的需求細修，目前先讓它能顯示圖片)
-        
-        initLevel(); // 重新渲染畫面
-    }
-}
