@@ -133,37 +133,141 @@ function checkAnswer() {
 }
 
 // ==========================================
-// 3. GBIF 自動連線與描述生成 (重點更新)
+// 3. GBIF 自動連線 (種名挑戰模式)
 // ==========================================
 
-function autoParseName(scientificName) {
-    let cleanName = scientificName.split(' ').slice(0, 2).join(' ').toLowerCase();
-    let detectedRoots = [];
+// 快速搜索輔助函式
+function quickSearch(keyword) {
+    document.getElementById('genus-input').value = keyword;
+    startGenusChallenge();
+}
+
+// 核心功能：開始屬名挑戰
+async function startGenusChallenge() {
+    const inputEl = document.getElementById('genus-input');
+    const genusKeyword = inputEl.value.trim();
     
-    if (typeof LATIN_ROOTS === 'undefined') return [];
+    if (!genusKeyword) {
+        alert("請先輸入想要挑戰的屬名！");
+        return;
+    }
 
-    let sortedDictionary = LATIN_ROOTS.sort((a, b) => b.root.length - a.root.length);
+    const feedbackEl = document.getElementById('mission-desc');
+    feedbackEl.textContent = `正在定位 ${genusKeyword} 屬的生物信號...`;
+    
+    try {
+        // 搜尋該屬底下的物種
+        // limit=100 抓多一點才能過濾掉太簡單的
+        const url = `${GBIF_API}?mediaType=StillImage&limit=100&q=${genusKeyword}`; 
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("API Error");
+        const data = await response.json();
+        
+        // 過濾資料：
+        // 1. 要有學名和圖片
+        // 2. 學名必須是「二名法」 (Genus species) 結構
+        // 3. 學名的第一個字必須包含我們搜尋的屬名 (確保沒搜歪)
+        const validResults = data.results.filter(item => {
+            if (!item.scientificName || !item.media || !item.media[0].identifier) return false;
+            
+            const parts = item.scientificName.split(' ');
+            // 確保至少有 屬名+種名 (長度>=2)
+            if (parts.length < 2) return false;
+            
+            // 確保搜出來的是目標屬 (忽略大小寫)
+            return parts[0].toLowerCase().includes(genusKeyword.toLowerCase());
+        });
 
-    sortedDictionary.forEach(item => {
-        if (cleanName.includes(item.root)) {
-            if (!detectedRoots.some(r => r.raw === item.root)) {
-                let displayRoot = item.root.charAt(0).toUpperCase() + item.root.slice(1);
+        if (validResults.length === 0) {
+            alert(`找不到 ${genusKeyword} 屬的相關圖片標本，請換一個屬名試試！`);
+            feedbackEl.textContent = "搜尋結果為空。";
+            return;
+        }
+
+        // 隨機取一隻
+        const specimen = validResults[Math.floor(Math.random() * validResults.length)];
+        
+        // --- 關鍵修改：分離 屬名 (Genus) 與 種名 (Species) ---
+        const nameParts = specimen.scientificName.split(' ');
+        const genusName = nameParts[0];      // e.g., Begonia
+        const speciesName = nameParts[1];    // e.g., maculata (這才是我們要猜的!)
+
+        // 拆解「種名」的字根
+        let parsedRoots = autoParseName(speciesName);
+        
+        // 如果字典裡沒有這個種名的字根，手動把種名當作一個卡牌
+        if (parsedRoots.length === 0) {
+             let dictEntry = LATIN_ROOTS.find(r => r.root === speciesName.toLowerCase()) || { root: speciesName, meaning: "獨特特徵" };
+             parsedRoots.push({
+                 text: speciesName, // 不轉大寫，保持原味或是首字大寫看你喜好
+                 raw: speciesName.toLowerCase(),
+                 meaning: dictEntry.meaning
+             });
+        }
+
+        // 生成描述 (傳入 屬名 和 字根)
+        const notes = generateSpeciesNotes(genusName, specimen, parsedRoots);
+
+        // 準備正確答案 (只含種名)
+        const solutionTexts = parsedRoots.map(r => r.text);
+        
+        // 準備混淆卡池
+        let pool = [...parsedRoots];
+        for(let i=0; i<5; i++) { // 多給一點干擾項
+            const randomRoot = LATIN_ROOTS[Math.floor(Math.random() * LATIN_ROOTS.length)];
+            // 避免重複
+            if (!pool.some(p => p.raw === randomRoot.root)) {
+                let display = randomRoot.root.charAt(0).toUpperCase() + randomRoot.root.slice(1);
+                // 視覺上加個後綴讓它看起來像種名
+                if(!display.startsWith("-")) display = display; 
                 
-                if (cleanName.startsWith(item.root)) displayRoot += "-";
-                else if (cleanName.endsWith(item.root)) displayRoot = "-" + displayRoot;
-                else displayRoot = "-" + displayRoot + "-";
-
-                detectedRoots.push({
-                    text: displayRoot,
-                    raw: item.root,
-                    meaning: item.meaning
+                pool.push({
+                    text: display + "?",
+                    meaning: randomRoot.meaning,
+                    raw: randomRoot.root
                 });
             }
         }
-    });
-    return detectedRoots;
+
+        const newLevel = {
+            id: "gbif-" + Date.now(),
+            targetName: speciesName, // 答案改成只有種名！
+            displayGenus: genusName, // 額外欄位：顯示屬名給玩家看
+            desc: notes.desc,
+            hint: notes.hint,
+            icon: "",
+            imageUrl: specimen.media[0].identifier,
+            solution: solutionTexts,
+            pool: pool
+        };
+
+        levels[currentLevelIdx] = newLevel;
+        initLevel();
+
+    } catch (error) {
+        console.error(error);
+        alert("連線失敗，請檢查網路。");
+    }
 }
 
+// 產生針對「種名」的提示
+function generateSpeciesNotes(genus, specimen, roots) {
+    const location = specimen.country || "未知產地";
+    
+    // 把意思串起來
+    let meanings = roots.map(r => `「${r.meaning}」`).join(" 或 ");
+    if (meanings === "") meanings = "某種特殊命名";
+
+    return {
+        desc: `📍 ${location} 發現的 ${genus} (屬)`,
+        hint: `🕵️ 種名解碼：這隻 ${genus} 的種名描述了 ${meanings}`
+    };
+}
+
+// 修改 initLevel 的 checkAnswer 邏輯 (配合 script.js 前半段)
+// 注意：你原本的 initLevel 裡面的 checkAnswer 可能比對的是 targetName
+// 因為現在 targetName 只有種名，所以邏輯不用大改，但 UI 顯示要注意
 // 產生「野外觀察筆記」文字
 function generateFieldNotes(specimen, roots) {
     // 1. 地理位置
@@ -269,3 +373,4 @@ document.getElementById('next-btn').onclick = () => {
 };
 
 initLevel();
+
