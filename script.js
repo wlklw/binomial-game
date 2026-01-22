@@ -278,6 +278,10 @@ function quickSearch(keyword) {
     startGenusChallenge();
 }
 
+async// ==========================================
+// 修正版：屬名挑戰 (含嚴格過濾 + HTTPS 修復)
+// ==========================================
+
 async function startGenusChallenge() {
     const inputEl = document.getElementById('genus-input');
     const genusKeyword = inputEl.value.trim();
@@ -291,68 +295,86 @@ async function startGenusChallenge() {
     feedbackEl.innerHTML = `📡 正在廣域搜索 <span style="color:#e94560">${genusKeyword}</span> 屬的多樣性標本...`;
     
     try {
-        // 1. 擴大搜索：抓 300 筆，增加抓到稀有種的機率
+        // 1. 抓取資料
         const url = `${GBIF_API}?mediaType=StillImage&limit=300&q=${genusKeyword}`; 
         
         const response = await fetch(url);
         if (!response.ok) throw new Error("API Network Error");
         const data = await response.json();
         
-        // 2. 初步過濾
+        // 2. 嚴格過濾 (Strict Filtering)
         const validResults = data.results.filter(item => {
+            // 基本檢查：要有學名、有圖片
             if (!item.scientificName || !item.media || !item.media[0].identifier) return false;
+            
             const parts = item.scientificName.split(' ');
+            
+            // 條件 A: 至少要有兩個字 (屬名 + 種名)
             if (parts.length < 2) return false;
-            return parts[0].toLowerCase().includes(genusKeyword.toLowerCase());
+            
+            // 條件 B: 屬名要對 (防呆)
+            if (!parts[0].toLowerCase().includes(genusKeyword.toLowerCase())) return false;
+
+            const speciesPart = parts[1];
+
+            // 條件 C: 踢掉 "Begonia L." 或 "Begonia sp." (種名太短或有點)
+            if (speciesPart.length < 3 || speciesPart.includes('.')) return false;
+
+            // 條件 D: 踢掉 "Begonia ×" 或數字 (非純字母)
+            // 正則表達式：只允許純英文字母
+            if (!/^[a-zA-Z]+$/.test(speciesPart)) return false;
+
+            return true;
         });
 
         if (validResults.length === 0) {
-            alert(`找不到 ${genusKeyword} 屬的相關圖片。`);
+            alert(`找不到 ${genusKeyword} 屬的「有效」物種圖片 (過濾了雜交種與未定種)。`);
             feedbackEl.textContent = "搜尋結果為空。";
             return;
         }
 
-        // --- 核心修改：物種分組演算法 (Species Grouping) ---
-        // 目的：避免常見物種 (如 Apis mellifera) 霸佔所有出現機率
+        // 3. 物種分組 (Species Grouping)
         const speciesGroups = {};
         
         validResults.forEach(item => {
-            // 只取前兩個字當學名 (屬名 + 種小名)，忽略亞種
             const speciesName = item.scientificName.split(' ').slice(0, 2).join(' ');
-            
             if (!speciesGroups[speciesName]) {
                 speciesGroups[speciesName] = [];
             }
             speciesGroups[speciesName].push(item);
         });
 
-        // 取得所有「獨特物種」的清單
         const uniqueSpeciesNames = Object.keys(speciesGroups);
-        
-        console.log(`搜尋到了 ${uniqueSpeciesNames.length} 種不同的物種：`, uniqueSpeciesNames); 
+        console.log(`過濾後剩下 ${uniqueSpeciesNames.length} 種有效物種`); // 方便除錯
 
-        // 3. 公平抽籤：先選「物種」，而不是選「照片」
+        // 4. 抽籤
         const randomSpecies = uniqueSpeciesNames[Math.floor(Math.random() * uniqueSpeciesNames.length)];
-        
-        // 4. 再從該物種中，隨機選一張照片
         const targetList = speciesGroups[randomSpecies];
         const specimen = targetList[Math.floor(Math.random() * targetList.length)];
         
+        // --- HTTPS 修復 (Mixed Content Fix) ---
+        // 如果圖片網址是 http 開頭，強制轉成 https，並嘗試避開某些不支援 https 的舊伺服器問題
+        // (註：大部分博物館伺服器支援 https，若圖片破圖通常是因為對方證書過期，這無法從前端完全解決)
+        let safeImageUrl = specimen.media[0].identifier;
+        if (safeImageUrl.startsWith("http://")) {
+            safeImageUrl = safeImageUrl.replace("http://", "https://");
+        }
+
         // --------------------------------------------------
 
         const nameParts = specimen.scientificName.split(' ');
         const genusName = nameParts[0];
         const speciesName = nameParts[1];
 
-        // 4. 拆解字根
+        // 5. 拆解字根
         let parsedRoots = autoParseName(speciesName);
         let wikiHint = null;
 
-        // 5. 字典查不到，問維基
+        // 6. 維基百科連線
         if (parsedRoots.length === 0) {
              let dictEntry = { root: speciesName, meaning: "特有名稱" };
              
-             // --- 呼叫維基百科 API ---
+             // 呼叫維基
              wikiHint = await getWikiHelper(genusName + " " + speciesName);
              
              if (wikiHint) {
@@ -389,7 +411,7 @@ async function startGenusChallenge() {
             desc: notes.desc,
             hint: notes.hint,
             icon: "",
-            imageUrl: specimen.media[0].identifier,
+            imageUrl: safeImageUrl, // 使用修復後的網址
             solution: solutionTexts,
             pool: pool
         };
@@ -402,7 +424,6 @@ async function startGenusChallenge() {
         alert("連線失敗，請檢查網路狀態。");
     }
 }
-
 // ==========================================
 // 6. 事件綁定
 // ==========================================
@@ -413,4 +434,5 @@ document.getElementById('next-btn').onclick = () => {
 
 // 啟動
 initLevel();
+
 
