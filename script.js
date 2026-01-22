@@ -343,6 +343,184 @@ document.getElementById('next-btn').onclick = () => {
     // 這裡不自動重置畫面，保留成就感，等待玩家下一步操作
 };
 
+// ==========================================
+// 6. 維基百科小幫手 (新增功能)
+// ==========================================
+
+async function getWikiHelper(scientificName) {
+    // 將學名轉為維基百科格式 (空格變底線)
+    const wikiKey = scientificName.replace(' ', '_');
+    // 優先抓取中文維基百科
+    const url = `https://zh.wikipedia.org/api/rest_v1/page/summary/${wikiKey}`;
+
+    try {
+        const response = await fetch(url);
+        if (!response.ok) return null; // 找不到條目
+
+        const data = await response.json();
+        if (!data.extract) return null;
+
+        // --- 防雷處理 (重要！) ---
+        // 我們要過濾掉摘要裡的「學名」和「屬名」，避免直接把答案講出來
+        let cleanText = data.extract;
+        
+        // 把學名 (如 Apis cerana) 換成 "此物種"
+        const regexSci = new RegExp(scientificName, "gi");
+        cleanText = cleanText.replace(regexSci, "此物種");
+        
+        // 為了避免太長，只取前 60 個字
+        if (cleanText.length > 60) {
+            cleanText = cleanText.substring(0, 60) + "...";
+        }
+
+        return `📖 維基記載：${cleanText}`;
+
+    } catch (e) {
+        console.log("Wiki fetch failed", e);
+        return null;
+    }
+}
+
+// ==========================================
+// 修正版：屬名挑戰 (整合維基百科)
+// ==========================================
+
+async function startGenusChallenge() {
+    const inputEl = document.getElementById('genus-input');
+    const genusKeyword = inputEl.value.trim();
+    const feedbackEl = document.getElementById('mission-desc');
+
+    if (!genusKeyword) {
+        alert("請輸入屬名！");
+        return;
+    }
+
+    feedbackEl.innerHTML = `📡 正在連線資料庫分析 <span style="color:#e94560">${genusKeyword}</span> 屬...`;
+    
+    try {
+        // 1. 抓取資料
+        const url = `${GBIF_API}?mediaType=StillImage&limit=300&q=${genusKeyword}`; 
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("API Network Error");
+        const data = await response.json();
+        
+        // 2. 驗證過濾
+        const validResults = data.results.filter(item => {
+            if (!item.scientificName || !item.media || !item.media[0].identifier) return false;
+            const parts = item.scientificName.split(' ');
+            return parts.length >= 2 && parts[0].toLowerCase().includes(genusKeyword.toLowerCase());
+        });
+
+        if (validResults.length === 0) {
+            alert(`找不到 ${genusKeyword} 屬的相關圖片。`);
+            feedbackEl.textContent = "搜尋結果為空。";
+            return;
+        }
+
+        // 3. 物種分組 (避免常見種霸榜)
+        const speciesGroups = {};
+        validResults.forEach(item => {
+            const speciesName = item.scientificName.split(' ').slice(0, 2).join(' ');
+            if (!speciesGroups[speciesName]) speciesGroups[speciesName] = [];
+            speciesGroups[speciesName].push(item);
+        });
+
+        const uniqueSpeciesNames = Object.keys(speciesGroups);
+        const randomSpecies = uniqueSpeciesNames[Math.floor(Math.random() * uniqueSpeciesNames.length)];
+        
+        const targetList = speciesGroups[randomSpecies];
+        const specimen = targetList[Math.floor(Math.random() * targetList.length)];
+        
+        // --------------------------------------------------
+        
+        const nameParts = specimen.scientificName.split(' ');
+        const genusName = nameParts[0];
+        const speciesName = nameParts[1];
+
+        // 4. 拆解字根 (嘗試查字典)
+        let parsedRoots = autoParseName(speciesName);
+        let wikiHint = null;
+
+        // 5. 如果字典裡沒東西，就去問維基百科！
+        if (parsedRoots.length === 0) {
+             // 先給一個暫時的字根物件
+             let dictEntry = { root: speciesName, meaning: "特有名稱" };
+             
+             // --- 呼叫維基百科 API ---
+             wikiHint = await getWikiHelper(genusName + " " + speciesName);
+             
+             // 如果維基百科有回傳資料，就把意思改成 "見上方描述"
+             if (wikiHint) {
+                 dictEntry.meaning = "請參考特徵提示";
+             }
+
+             parsedRoots.push({
+                 text: speciesName.charAt(0).toUpperCase() + speciesName.slice(1),
+                 raw: speciesName.toLowerCase(),
+                 meaning: dictEntry.meaning
+             });
+        }
+
+        // 6. 生成描述 (傳入 wikiHint)
+        const notes = generateSpeciesNotes(genusName, specimen, parsedRoots, wikiHint);
+        const solutionTexts = parsedRoots.map(r => r.text);
+        
+        // 7. 混淆卡池
+        let pool = [...parsedRoots];
+        for(let i=0; i<5; i++) {
+            const randomRoot = LATIN_ROOTS[Math.floor(Math.random() * LATIN_ROOTS.length)];
+            if (!pool.some(p => p.raw === randomRoot.root)) {
+                let display = randomRoot.root.charAt(0).toUpperCase() + randomRoot.root.slice(1);
+                pool.push({
+                    text: display + "?",
+                    meaning: randomRoot.meaning,
+                    raw: randomRoot.root
+                });
+            }
+        }
+
+        const newLevel = {
+            id: "gbif-" + Date.now(),
+            targetName: speciesName,
+            displayGenus: genusName,
+            desc: notes.desc,
+            hint: notes.hint,
+            icon: "",
+            imageUrl: specimen.media[0].identifier,
+            solution: solutionTexts,
+            pool: pool
+        };
+
+        levels[currentLevelIdx] = newLevel;
+        initLevel();
+
+    } catch (error) {
+        console.error(error);
+        alert("連線失敗，請檢查網路狀態。");
+    }
+}
+
+// 更新描述生成邏輯 (支援維基提示)
+function generateSpeciesNotes(genus, specimen, roots, wikiHint) {
+    const location = specimen.country || "未知產地";
+    
+    // 如果有維基百科的資料，優先顯示維基百科！
+    if (wikiHint) {
+        return {
+            desc: `📍 採集地：${location}`,
+            hint: wikiHint // 直接用維基百科的摘要當提示
+        };
+    }
+
+    // 否則顯示字根解釋
+    let meanings = roots.map(r => `「${r.meaning}」`).join(" 加 ");
+    return {
+        desc: `📍 採集地：${location}`,
+        hint: `🕵️ 命名線索：種名描述了 ${meanings}`
+    };
+}
+
 // 啟動
 initLevel();
+
 
