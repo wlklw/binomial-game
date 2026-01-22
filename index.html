@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dr. Binomial's Lab - 瘋狂造物主</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <h1>Dr. Binomial's Lab</h1>
+    <div class="subtitle">Lv. 1 實習生 - 字源合成實驗</div>
+
+    <div class="stage-area">
+        <div class="target-image" id="target-icon">❓</div>
+        <div class="mission-text" id="mission-desc">載入中...</div>
+        <div class="hint-text" id="mission-hint"></div>
+        
+        <div class="feedback" id="feedback-msg"></div>
+
+        <div class="synthesis-chamber">
+            <div class="slot" id="slot-0"></div>
+            <div class="slot" id="slot-1"></div>
+        </div>
+
+        <button class="next-btn" id="next-btn">下一隻生物 &rarr;</button>
+    </div>
+
+    <div class="lab-bench">
+        <div class="bench-label">可用字根 (點擊加入)</div>
+        <div class="card-pool" id="pool">
+            </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
